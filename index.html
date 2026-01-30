@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Futuristic ZEELAG Clock</title>
+<style>
+body{
+  margin:0; height:100vh;
+  display:flex; flex-direction:column; justify-content:center; align-items:center;
+  background:#0a0a0a; font-family:Arial; color:white; overflow-x:hidden;
+}
+.clock{
+  width:360px; height:360px; border:6px solid #0ff; border-radius:50%;
+  position:relative; background:#000; box-shadow:0 0 40px #0ff inset;
+}
+.num{position:absolute; transform:translate(-50%,-50%); font-size:18px; color:#0ff; text-shadow:0 0 6px #0ff;}
+.brand{position:absolute; top:52%; left:50%; transform:translate(-50%,-50%); color:#0ff; font-weight:bold; letter-spacing:4px; text-shadow:0 0 15px #0ff;}
+.ampm{position:absolute; top:62%; left:50%; transform:translate(-50%,-50%); font-size:14px; opacity:.9; color:#0ff; text-shadow:0 0 8px #0ff;}
+.hand{position:absolute; bottom:50%; left:50%; transform-origin:bottom; transform:translateX(-50%); transition: all 0.2s linear; box-shadow:0 0 8px #0ff;}
+.hour{width:8px;height:80px;background:#0ff; border-radius:4px;}
+.min{width:5px;height:120px;background:#0ff; border-radius:3px;}
+.sec{width:2px;height:140px;background:#0ff; border-radius:2px;}
+#menuButton{
+  position:absolute; top:10px; right:10px; font-size:28px; cursor:pointer; z-index:200;
+  color:#0ff; text-shadow:0 0 10px #0ff; transition:0.3s;
+}
+#menuButton:hover{transform:rotate(90deg);}
+#menuPanel{
+  position:absolute; top:0; right:0;
+  background:rgba(0,0,0,0.95); border-left:2px solid #0ff;
+  display:none; padding:20px; z-index:100; width:260px; max-height:100vh; overflow:auto;
+  box-shadow:-4px 0 20px #0ff;
+  animation:slideIn 0.3s forwards;
+}
+@keyframes slideIn{from{transform:translateX(100%);} to{transform:translateX(0);}}
+@keyframes slideOut{from{transform:translateX(0);} to{transform:translateX(100%);}}
+button,input,select{padding:6px 12px; font-size:13px; border-radius:8px; border:none; cursor:pointer; background:#111; color:#0ff; text-shadow:0 0 6px #0ff; transition:0.3s;}
+button:hover{background:#0ff; color:#000; text-shadow:none;}
+.thumbnail{width:30px; height:30px; border-radius:50%; border:1px solid #0ff; cursor:pointer; margin:2px; box-shadow:0 0 8px #0ff;}
+.soundBtn{padding:5px 8px; font-size:12px; margin:2px; border-radius:6px; border:1px solid #0ff; transition:0.3s;}
+.soundBtn.active{background:#0ff; color:#000; text-shadow:none;}
+#alarmControls{ display:none; margin-bottom:20px;}
+#alarmControls button{ padding:12px 18px; margin:0 6px; font-size:16px; border-radius:12px; box-shadow:0 0 12px #0ff;}
+.status{ font-size:13px; margin-top:4px; opacity:0.9;}
+</style>
+</head>
+<body>
+
+<div id="alarmControls">
+  <button onclick="dismissAlarm()">DISMISS</button>
+  <button onclick="snoozeAlarm()">SNOOZE 5m</button>
+</div>
+
+<div class="clock" id="clock">
+  <div class="brand">ZEELAG</div>
+  <div class="ampm" id="ampmLabel">AM</div>
+  <div class="hand hour" id="h"></div>
+  <div class="hand min" id="m"></div>
+  <div class="hand sec" id="s"></div>
+</div>
+
+<div id="menuButton" onclick="toggleMenu()">⋮</div>
+
+<div id="menuPanel">
+  <b>Time & Alarm Settings</b>
+
+  <div>
+    <label>Set Time:</label>
+  </div>
+  <div>
+    <input id="setH" type="number" min="1" max="12" placeholder="HH">
+    <input id="setM" type="number" min="0" max="59" placeholder="MM">
+    <select id="setAP"><option>AM</option><option>PM</option></select>
+    <button onclick="setTime()">Set</button>
+  </div>
+
+  <div>
+    <label>Set Alarm:</label>
+  </div>
+  <div>
+    <input id="alarmH" type="number" min="1" max="12" placeholder="HH">
+    <input id="alarmM" type="number" min="0" max="59" placeholder="MM">
+    <select id="alarmAP"><option>AM</option><option>PM</option></select>
+    <button onclick="setAlarm()">Set</button>
+  </div>
+
+  <div>
+    <button onclick="toggleTick()">Tick: ON</button>
+  </div>
+
+  <div>
+    <label>Clock Styles:</label>
+    <div id="styleThumbnails"></div>
+  </div>
+
+  <div>
+    <label>Alarm Sounds:</label>
+    <div id="alarmSounds"></div>
+  </div>
+
+  <div>
+    <button onclick="document.getElementById('customAlarmInput').click()">Upload Alarm</button>
+    <input type="file" id="customAlarmInput" accept="audio/*" style="display:none" onchange="loadCustomAlarm(event)">
+    <div id="customPreview"></div>
+  </div>
+
+  <div class="status" id="status">Alarm: OFF</div>
+</div>
+
+<script>
+// ===== numbers =====
+const clock=document.getElementById("clock");
+for(let i=1;i<=12;i++){
+  const a=i*30*Math.PI/180,r=150,x=180+r*Math.sin(a),y=180-r*Math.cos(a);
+  const d=document.createElement("div"); d.className="num"; d.innerText=i; d.style.left=x+"px"; d.style.top=y+"px";
+  clock.appendChild(d);
+}
+
+// ===== audio =====
+const ctx=new (window.AudioContext||window.webkitAudioContext)();
+document.body.addEventListener("click",()=>ctx.resume(),{once:true});
+let tickOn=true,alarmMinutes=null,alarmActive=false,alarmType='ambulance',customAlarmBuffer=null;
+function tick(){if(!tickOn) return; const o=ctx.createOscillator(); const g=ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.value=1200; g.gain.value=0.03; o.start(); o.stop(ctx.currentTime+0.03);}
+function toggleTick(){ tickOn=!tickOn; alert("Tick: "+(tickOn?"ON":"OFF")); }
+
+function setAlarmSound(type){
+  alarmType=type; localStorage.setItem('alarmType',type);
+  document.querySelectorAll('.soundBtn').forEach(b=>b.classList.remove('active'));
+  document.querySelector(`.soundBtn[data-type="${type}"]`).classList.add('active');
+}
+
+// ===== custom alarm =====
+function loadCustomAlarm(e){
+  const file=e.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=function(evt){ctx.decodeAudioData(evt.target.result,buf=>{customAlarmBuffer=buf; const p=document.getElementById('customPreview'); p.innerHTML='<button onclick="playCustomPreview()">Play</button>'; alert("Custom alarm loaded!");});};
+  reader.readAsArrayBuffer(file);
+}
+function playCustomPreview(){ if(!customAlarmBuffer) return; const src=ctx.createBufferSource(); src.buffer=customAlarmBuffer; const g=ctx.createGain(); src.connect(g); g.connect(ctx.destination); g.gain.value=1; src.start();}
+
+// ===== siren =====
+let sirenInterval=null;
+function startSiren(){
+  if(sirenInterval) return;
+  sirenInterval=setInterval(()=>{
+    if(customAlarmBuffer){ playCustomPreview(); }
+    else{
+      const o=ctx.createOscillator(); const g=ctx.createGain(); o.connect(g); g.connect(ctx.destination);
+      let fStart=600,fEnd=1400;
+      switch(alarmType){
+        case 'beep': fStart=800; fEnd=1000; break;
+        case 'siren': fStart=500; fEnd=1600; break;
+        case 'digital': fStart=1200; fEnd=1400; break;
+        case 'ambulance': fStart=650; fEnd=1500; break;
+        case 'alarm1': fStart=700; fEnd=1600; break;
+        case 'alarm2': fStart=600; fEnd=1800; break;
+        case 'alarm3': fStart=800; fEnd=1700; break;
+      }
+      o.frequency.setValueAtTime(fStart,ctx.currentTime); o.frequency.linearRampToValueAtTime(fEnd,ctx.currentTime+0.4);
+      g.gain.value=0.4; o.start(); o.stop(ctx.currentTime+0.4);
+    }
+  },400);
+}
+function stopSiren(){ clearInterval(sirenInterval); sirenInterval=null; }
+
+// ===== time =====
+let offset=0;
+function setTime(){ let hh=+setH.value, mm=+setM.value; if(isNaN(hh)||isNaN(mm)) return; if(setAP.value==="PM" && hh<12) hh+=12; if(setAP.value==="AM" && hh===12) hh=0; const t=new Date(); t.setHours(hh,mm,0,0); offset=t-Date.now(); }
+function setAlarm(){ let hh=+alarmH.value, mm=+alarmM.value; if(isNaN(hh)||isNaN(mm)) return; if(alarmAP.value==="PM" && hh<12) hh+=12; if(alarmAP.value==="AM" && hh===12) hh=0; alarmMinutes=hh*60+mm; alarmActive=false; status.innerText="Alarm: ON";}
+function dismissAlarm(){ alarmActive=false; stopSiren(); alarmMinutes=null; alarmControls.style.display="none"; status.innerText="Alarm: OFF";}
+function snoozeAlarm(){ if(!alarmActive) return; alarmMinutes+=5; alarmActive=false; stopSiren(); alarmControls.style.display="none"; status.innerText="Alarm: ON (Snoozed 5m)";}
+
+// ===== update =====
+const h=document.getElementById('h'), m=document.getElementById('m'), s=document.getElementById('s'), ampmLabel=document.getElementById('ampmLabel'), status=document.getElementById('status');
+function update(){ const now=new Date(Date.now()+offset); const sec=now.getSeconds(),min=now.getMinutes(),hr=now.getHours(); const hr12=hr%12||12; ampmLabel.innerText=hr>=12?"PM":"AM"; s.style.transform=`translateX(-50%) rotate(${sec*6}deg)`; m.style.transform=`translateX(-50%) rotate(${min*6+sec*0.1}deg)`; h.style.transform=`translateX(-50%) rotate(${(hr12*30)+min*0.5}deg)`; tick(); if(alarmMinutes!==null){const cur=hr*60+min;if(cur===alarmMinutes && sec===0 && !alarmActive){alarmActive=true; status.innerText="⏰ ALARM!"; alarmControls.style.display="block"; startSiren();}}}
+setInterval(update,1000); update();
+
+// ===== clock styles =====
+const clockStyles=[{bg:"#000",h:"#0ff",m:"#0ff",s:"#0ff",brand:"#0ff"},{bg:"#100",h:"#f22",m:"#f55",s:"#f00",brand:"#f22"},{bg:"#001",h:"#00f",m:"#55f",s:"#0ff",brand:"#0ff"},{bg:"#010",h:"#0f0",m:"#5f5",s:"#0ff",brand:"#0f0"},{bg:"#101",h:"#a0f",m:"#c0f",s:"#f0f",brand:"#a0f"},{bg:"#210",h:"#f80",m:"#fb0",s:"#fa0",brand:"#f80"},{bg:"#555",h:"#eee",m:"#ccc",s:"#888",brand:"#eee"}];
+const styleContainer=document.getElementById('styleThumbnails');
+clockStyles.forEach((st,i)=>{ const div=document.createElement('div'); div.className='thumbnail'; div.style.background=st.bg; div.onclick=()=>setClockStyle(i); styleContainer.appendChild(div);});
+function setClockStyle(i){ const st=clockStyles[i]; clock.style.background=st.bg; h.style.background=st.h; m.style.background=st.m; s.style.background=st.s; document.querySelector('.brand').style.color=st.brand; localStorage.setItem('clockStyle',i);}
+
+// ===== alarm sound buttons inside menu =====
+const alarmTypes=['ambulance','siren','beep','digital','alarm1','alarm2','alarm3'];
+const alarmContainer=document.getElementById('alarmSounds');
+alarmTypes.forEach(t=>{
+  const b=document.createElement('button'); b.className='soundBtn'; b.setAttribute('data-type',t); b.innerText=t; b.onclick=()=>setAlarmSound(t); alarmContainer.appendChild(b);
+});
+
+// ===== menu =====
+function toggleMenu(){ const mp=document.getElementById('menuPanel'); if(mp.style.display==='block'){ mp.style.animation='slideOut 0.3s forwards'; setTimeout(()=>mp.style.display='none',300);} else{ mp.style.display='block'; mp.style.animation='slideIn 0.3s forwards';}}
+
+// ===== persistent =====
+window.onload=function(){ const savedStyle=localStorage.getItem('clockStyle'); if(savedStyle!==null) setClockStyle(savedStyle); const savedType=localStorage.getItem('alarmType'); if(savedType) setAlarmSound(savedType);}
+</script>
+</body>
+</html>
